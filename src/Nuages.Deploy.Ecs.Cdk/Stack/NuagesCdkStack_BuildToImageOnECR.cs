@@ -34,9 +34,9 @@ public partial class NuagesCdkStack
             ProjectName = MakeId($"{StackName}BuildToECR"),
             Source = Source.GitHub(new GitHubSourceProps
             {
-                Owner = DeploymentOptions.GitHubRepository.Split("/").First(),
-                Repo = DeploymentOptions.GitHubRepository.Split("/").Last(),
-                BranchOrRef = DeploymentOptions.GitHubBranch,
+                Owner = SourceOptions.GitHubRepository.Split("/").First(),
+                Repo = SourceOptions.GitHubRepository.Split("/").Last(),
+                BranchOrRef = SourceOptions.GitHubBranch,
                 Webhook = false
             }),
             Environment = new BuildEnvironment
@@ -171,23 +171,12 @@ public partial class NuagesCdkStack
         
         var imageDef = new Artifact_("BuildArtifact");
 
-        var parts = DeploymentOptions.GitHubRepository.Split("/");
-
         var sourceStageProps = new StageProps
         {
             StageName = "Source",
-            Actions = new IAction[]
+            Actions = new []
             {
-                new CodeStarConnectionsSourceAction(new CodeStarConnectionsSourceActionProps
-                {
-                    ConnectionArn = DeploymentOptions.GitHubConnectionArn,
-                    Output = sourceArtifact,
-                    Owner = parts.First(),
-                    Repo = parts.Last(),
-                    Branch = DeploymentOptions.GitHubBranch,
-                    TriggerOnPush = DeploymentOptions.TriggerOnPush,
-                    ActionName = "Source"
-                })
+                GetSourceAction(sourceArtifact)
             }
         };
 
@@ -294,5 +283,48 @@ public partial class NuagesCdkStack
         });
         
         deployPipeline.Node.AddDependency(buildImagePipeline);
+    }
+
+    private IAction GetSourceAction(Artifact_ sourceArtifact)
+    {
+        var parts = SourceOptions.GitHubRepository.Split("/");
+        
+        if (!string.IsNullOrEmpty(SourceOptions.GitHubConnectionArn))
+        {
+            return new CodeStarConnectionsSourceAction(new CodeStarConnectionsSourceActionProps
+            {
+                ConnectionArn = SourceOptions.GitHubConnectionArn,
+                Output = sourceArtifact,
+                Owner = parts.First(),
+                Repo = parts.Last(),
+                Branch = SourceOptions.GitHubBranch,
+                TriggerOnPush = DeploymentOptions.TriggerOnPush,
+                ActionName = "Source"
+            });
+        }
+
+        if (!string.IsNullOrEmpty(SourceOptions.GitHubPersonnalAccessTokenSecretName))
+        {
+            GitHubTrigger? trigger = null;
+            if (DeploymentOptions.TriggerOnPush)
+            {
+                trigger = GitHubTrigger.WEBHOOK;
+            }
+            
+            new GitHubSourceAction(new GitHubSourceActionProps
+            {
+                OauthToken = SecretValue.SecretsManager(SourceOptions.GitHubPersonnalAccessTokenSecretName),
+                Output = sourceArtifact,
+                Owner =  parts.First(),
+                Repo =  parts.Last(),
+                Branch = SourceOptions.GitHubBranch,
+                Trigger = trigger,
+                ActionName = "Source",
+                RunOrder = null,
+                VariablesNamespace = null
+            });
+        }
+        
+        throw new Exception("You must at least provide either of GitHubConnectionArn or GitHubPersonnalAccessTokenSecretName");
     }
 }
